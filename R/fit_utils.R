@@ -66,7 +66,8 @@ prepare_frailty_fit <- function(
     "zig",
     "entry",
     "stop",
-    "status"
+    "status",
+    "y_entry"
   )
 
   missing_long <- setdiff(
@@ -104,6 +105,10 @@ prepare_frailty_fit <- function(
   n_pairs <- sim$n_pairs_observed
   n_subjects <- nrow(subjects)
 
+  if (length(sim$pair_zig) != n_pairs) {
+    stop("pair_zig is incompatible with n_pairs_observed")
+  }
+
   long_subject_index <- match(
     long$id,
     subjects$id
@@ -128,32 +133,6 @@ prepare_frailty_fit <- function(
     n_subjects
   )
 
-  first_row <- vapply(
-    subjects$id,
-    function(id) {
-      rows <- which(long$id == id)
-
-      if (length(rows) == 0L) {
-        return(NA_integer_)
-      }
-
-      rows[
-        which.min(
-          long$start[rows]
-        )
-      ]
-    },
-    integer(1)
-  )
-
-  if (anyNA(first_row)) {
-    stop("unable to identify the entry covariate for some subjects")
-  }
-
-  y_entry <- long$y[
-    first_row
-  ]
-
   list(
     long = long,
     subjects = subjects,
@@ -173,9 +152,10 @@ prepare_frailty_fit <- function(
     d_subject = d_subject,
     start = long$start,
     stop = long$stop,
+    log_stop = log(long$stop),
     status = long$status,
     y = long$y,
     entry = subjects$entry,
-    y_entry = y_entry
+    y_entry = subjects$y_entry
   )
 }
