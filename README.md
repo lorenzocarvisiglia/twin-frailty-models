@@ -1,40 +1,27 @@
 # Twin frailty models
 
-R code for frailty survival models with delayed entry and longitudinal
-time-varying covariates in twin data.
+R code for simulation and estimation of frailty survival models for twin data with delayed entry, right censoring, and longitudinal time-varying covariates.
 
-The repository contains simulation and estimation code for three frailty
-structures:
+The repository implements three frailty structures:
 
-- power gamma frailty model
-- nested gamma frailty model
-- correlated lognormal frailty model
-
-The methods allow for delayed entry, right censoring, and time-varying
-covariates represented in start-stop format.
+- power gamma frailty
+- nested gamma frailty
+- correlated lognormal frailty
 
 ## Repository structure
 
-- `R/`: reusable functions for simulation, likelihood evaluation, and model fitting
-- `scripts/`: reproducible scripts for the simulation experiments
-- `examples/`: simple examples illustrating how to use the models
+```text
+R/
+├── simulation_utils.R
+├── fit_utils.R
+├── power_gamma_simulation.R
+├── power_gamma_fit.R
+├── nested_gamma_simulation.R
+├── nested_gamma_fit.R
+├── correlated_lognormal_simulation.R
+└── correlated_lognormal_fit.R
 
-## Simulation studies
-
-The repository includes code for:
-
-- correct-specification experiments
-- sample-size experiments
-- baseline-hazard misspecification
-- semiparametric baseline estimation
-- frailty-structure misspecification
-
-## Requirements
-
-The code is written in R and is intended to run on a standard personal
-computer. Cluster-specific scripts, parallel execution, and machine-specific
-file paths are not required.
-
-## Status
-
-The repository is under active development.
+examples/
+├── power_gamma_simulation.R
+├── nested_gamma_simulation.R
+└── correlated_lognormal_simulation.R
