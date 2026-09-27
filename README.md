@@ -90,7 +90,7 @@ The semiparametric fitters use the corresponding parametric fit for initializati
 The main semiparametric fitting functions are:
 
 ```r
-fit_power_gamma_semiparametric(sim)
+fit_power_gamma_semiparametric_profile(sim)
 fit_nested_gamma_semiparametric_profile(sim)
 fit_correlated_lognormal_semiparametric_profile(sim)
 ```
