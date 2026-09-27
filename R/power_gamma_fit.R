@@ -2,84 +2,9 @@ prepare_power_fit <- function(
     sim
 ) {
 
-  prep <- prepare_frailty_fit(
+  prepare_frailty_fit(
     sim
   )
-
-  required <- c(
-    "grid_start",
-    "grid_stop",
-    "y_history"
-  )
-
-  missing <- setdiff(
-    required,
-    names(sim)
-  )
-
-  if (length(missing) > 0L) {
-    stop(
-      "simulation object is missing: ",
-      paste(
-        missing,
-        collapse = ", "
-      )
-    )
-  }
-
-  n_intervals <- length(
-    sim$grid_start
-  )
-
-  if (length(sim$grid_stop) != n_intervals) {
-    stop(
-      "grid_start and grid_stop must have the same length"
-    )
-  }
-
-  if (ncol(sim$y_history) != n_intervals) {
-    stop(
-      "y_history is incompatible with the time grid"
-    )
-  }
-
-  if (nrow(sim$y_history) != prep$n_subjects) {
-    stop(
-      "y_history is incompatible with the observed subjects"
-    )
-  }
-
-  entry_matrix <- matrix(
-    prep$entry,
-    nrow = prep$n_subjects,
-    ncol = n_intervals
-  )
-
-  entry_interval_start <- matrix(
-    sim$grid_start,
-    nrow = prep$n_subjects,
-    ncol = n_intervals,
-    byrow = TRUE
-  )
-
-  entry_interval_stop <- matrix(
-    sim$grid_stop,
-    nrow = prep$n_subjects,
-    ncol = n_intervals,
-    byrow = TRUE
-  )
-
-  prep$y_history <- sim$y_history
-
-  prep$entry_interval_start <-
-    entry_interval_start
-
-  prep$entry_interval_end <- pmin(
-    entry_matrix,
-    entry_interval_stop
-  )
-
-  prep
 }
 
 
@@ -938,20 +863,12 @@ make_power_nll <- function(
       prep$n_pairs
     )
 
-    entry_increment <- pmax(
-      prep$entry_interval_end^rho -
-        prep$entry_interval_start^rho,
-      0
-    )
-
     entry_subject <-
       lambda *
-      rowSums(
-        entry_increment *
-          exp(
-            alpha *
-              prep$y_history
-          )
+      prep$entry^rho *
+      exp(
+        alpha *
+          prep$y_entry
       )
 
     if (
