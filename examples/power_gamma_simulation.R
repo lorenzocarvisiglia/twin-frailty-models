@@ -1,6 +1,7 @@
 source("R/simulation_utils.R")
 source("R/fit_utils.R")
-source("R/power_gamma.R")
+source("R/power_gamma_simulation.R")
+source("R/power_gamma_fit.R")
 
 set.seed(1234)
 
