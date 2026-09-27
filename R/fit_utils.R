@@ -159,3 +159,75 @@ prepare_frailty_fit <- function(
     y_entry = subjects$y_entry
   )
 }
+
+bounded_gradient <- function(
+    fn,
+    x,
+    lower,
+    upper,
+    rel_step = 1e-4
+) {
+
+  g <- numeric(
+    length(x)
+  )
+
+  f0 <- fn(
+    x
+  )
+
+  for (i in seq_along(x)) {
+
+    h <- rel_step *
+      max(
+        1,
+        abs(x[i])
+      )
+
+    can_minus <-
+      x[i] - h >= lower[i]
+
+    can_plus <-
+      x[i] + h <= upper[i]
+
+    if (can_minus && can_plus) {
+
+      xp <- x
+      xm <- x
+
+      xp[i] <- xp[i] + h
+      xm[i] <- xm[i] - h
+
+      g[i] <- (
+        fn(xp) -
+          fn(xm)
+      ) / (2 * h)
+
+    } else if (can_plus) {
+
+      xp <- x
+      xp[i] <- xp[i] + h
+
+      g[i] <- (
+        fn(xp) -
+          f0
+      ) / h
+
+    } else if (can_minus) {
+
+      xm <- x
+      xm[i] <- xm[i] - h
+
+      g[i] <- (
+        f0 -
+          fn(xm)
+      ) / h
+
+    } else {
+
+      g[i] <- NA_real_
+    }
+  }
+
+  g
+}
