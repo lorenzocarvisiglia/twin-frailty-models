@@ -628,6 +628,27 @@ make_start_stop_data <- function(
     grid_start
   )
 
+  entry_interval <- findInterval(
+    entry_keep,
+    grid_start,
+    rightmost.closed = TRUE
+  )
+
+  entry_interval <- pmax(
+    1L,
+    pmin(
+      n_intervals,
+      entry_interval
+    )
+  )
+
+  y_entry <- y_keep[
+    cbind(
+      seq_along(entry_keep),
+      entry_interval
+    )
+  ]
+
   entry_matrix <- matrix(
     entry_keep,
     nrow = n_keep,
@@ -689,7 +710,7 @@ make_start_stop_data <- function(
         stop_long -
           stop_keep[rr]
       ) <
-      sqrt(.Machine$double.eps)
+      1e-8
   )
 
   long <- data.frame(
@@ -699,15 +720,28 @@ make_start_stop_data <- function(
     zig = subjects_keep$zig[rr],
     start = start_long,
     stop = stop_long,
-    status = status_long,
     y = y_keep[
       cbind(
         rr,
         cc
       )
     ],
+    status = status_long,
     stringsAsFactors = FALSE
   )
+
+  long <- long[
+    order(
+      long$pair_index,
+      long$id,
+      long$start,
+      long$stop
+    ),
+    ,
+    drop = FALSE
+  ]
+
+  rownames(long) <- NULL
 
   subjects <- data.frame(
     pair_index = pair_index,
@@ -717,10 +751,22 @@ make_start_stop_data <- function(
     entry = entry_keep,
     stop = stop_keep,
     status = status_keep,
+    y_entry = y_entry,
     event_time = event_time_keep,
     censoring = censoring_keep,
     stringsAsFactors = FALSE
   )
+
+  subjects <- subjects[
+    order(
+      subjects$pair_index,
+      subjects$id
+    ),
+    ,
+    drop = FALSE
+  ]
+
+  rownames(subjects) <- NULL
 
   list(
     long = long,
