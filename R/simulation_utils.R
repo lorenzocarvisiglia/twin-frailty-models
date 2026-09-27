@@ -65,3 +65,90 @@ simulate_weibull_event_times <- function(
 
   event_time
 }
+
+
+make_time_grid <- function(
+    followup_max,
+    visit_step = 1
+) {
+
+  if (followup_max <= 0) {
+    stop("followup_max must be positive")
+  }
+
+  if (visit_step <= 0) {
+    stop("visit_step must be positive")
+  }
+
+  grid_start <- seq(
+    0,
+    followup_max - 1e-12,
+    by = visit_step
+  )
+
+  grid_stop <- pmin(
+    grid_start + visit_step,
+    followup_max
+  )
+
+  list(
+    start = grid_start,
+    stop = grid_stop
+  )
+}
+
+
+simulate_longitudinal_covariate <- function(
+    n_pairs,
+    grid_start,
+    beta0,
+    beta1,
+    sd_pair = 0.1,
+    sd_individual = 0.1
+) {
+
+  if (n_pairs <= 0) {
+    stop("n_pairs must be positive")
+  }
+
+  if (sd_pair < 0 || sd_individual < 0) {
+    stop("standard deviations must be non-negative")
+  }
+
+  n_subjects <- 2L * n_pairs
+
+  pair_effect <- rnorm(
+    n_pairs,
+    mean = 0,
+    sd = sd_pair
+  )
+
+  individual_effect <- rnorm(
+    n_subjects,
+    mean = 0,
+    sd = sd_individual
+  )
+
+  intercept <- beta0 +
+    rep(pair_effect, each = 2L) +
+    individual_effect
+
+  y <- matrix(
+    intercept,
+    nrow = n_subjects,
+    ncol = length(grid_start)
+  ) +
+    matrix(
+      beta1 * grid_start,
+      nrow = n_subjects,
+      ncol = length(grid_start),
+      byrow = TRUE
+    )
+
+  list(
+    y = y,
+    pair_effect = pair_effect,
+    individual_effect = individual_effect
+  )
+}
+
