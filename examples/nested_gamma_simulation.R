@@ -1,7 +1,7 @@
 source("R/simulation_utils.R")
 source("R/fit_utils.R")
 source("R/nested_gamma_simulation.R")
-source("R/nested_gamma_fit.R")
+source("R/nested_gamma_parametric_fit.R")
 
 set.seed(1234)
 
