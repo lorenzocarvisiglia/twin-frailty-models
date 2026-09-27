@@ -1,7 +1,7 @@
 source("R/simulation_utils.R")
 source("R/fit_utils.R")
 source("R/correlated_lognormal_simulation.R")
-source("R/correlated_lognormal_fit.R")
+source("R/correlated_lognormal_parametric_fit.R")
 
 set.seed(1234)
 
