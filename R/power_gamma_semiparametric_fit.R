@@ -1080,403 +1080,417 @@ optimize_power_semiparametric_structural <- function(
   )
 }
 
-fit_power_gamma_semiparametric <- function(
+fit_power_gamma_semiparametric_profile <- function(
   sim,
-  outer_max_iter = 100L,
-  outer_tolerance = 1e-5,
   verbose = FALSE
 ) {
-  setup <-
-    make_power_semiparametric_setup(
-      sim
-    )
+  setup <- make_power_semiparametric_setup(sim)
+  weibull_fit <- fit_power_gamma(sim = sim)
 
-  weibull_fit <- fit_power_gamma(
-    sim = sim
-  )
-
-  get_est <- function(
-    name,
-    fallback
-  ) {
+  get_est <- function(name, fallback) {
     z <- weibull_fit$estimates[[name]]
-
-    if (
-      length(z) == 1L &&
-      is.finite(z)
-    ) {
+    if (length(z) == 1L && is.finite(z)) {
       as.numeric(z)
     } else {
       fallback
     }
   }
 
-  theta0 <- get_est(
-    "theta",
-    0.5
+  theta0 <- get_est("theta", 0.5)
+  gamma0 <- get_est("gamma", 1)
+  alpha0 <- get_est("alpha", 0)
+  lambda0 <- get_est("lambda", 0.1)
+  rho0 <- get_est("rho", 2)
+
+  q0 <- c(log(theta0), log(gamma0), alpha0)
+  previous_times <- c(0, setup$event_times[-setup$M])
+  delta0 <- lambda0 * (
+    setup$event_times^rho0 -
+      previous_times^rho0
   )
+  delta0 <- pmax(delta0, 1e-10)
 
-  gamma0 <- get_est(
-    "gamma",
-    1
-  )
+  lower <- c(log(0.02), log(0.05), -10)
+  upper <- c(log(10), log(8), 10)
 
-  alpha0 <- get_est(
-    "alpha",
-    0
-  )
-
-  lambda0 <- get_est(
-    "lambda",
-    0.1
-  )
-
-  rho0 <- get_est(
-    "rho",
-    2
-  )
-
-  q <- c(
-    log(theta0),
-    log(gamma0),
-    alpha0
-  )
-
-  previous_times <- c(
-    0,
-    setup$event_times[
-      -setup$M
-    ]
-  )
-
-  delta <-
-    lambda0 *
-      (
-        setup$event_times^rho0 -
-          previous_times^rho0
-      )
-
-  delta <- pmax(
-    delta,
-    1e-10
-  )
-
-  loglik_previous <- -Inf
-  converged <- FALSE
-
-  history <- vector(
-    "list",
-    outer_max_iter
-  )
-
-  for (
-    outer_iter in
-      seq_len(
-        outer_max_iter
-      )
+  make_solver <- function(
+    delta_initial,
+    baseline_tolerance,
+    baseline_max_iter,
+    phase
   ) {
-    q_old <- q
-    delta_old <- delta
+    state <- new.env(parent = emptyenv())
+    state$q <- NULL
+    state$delta <- delta_initial
+    state$profile <- NULL
+    state$n_profile <- 0L
+    state$history <- list()
 
-    baseline_fit <-
-      fit_power_semiparametric_baseline(
-        setup = setup,
+    same_q <- function(x, y) {
+      !is.null(y) &&
+        length(x) == length(y) &&
+        max(abs(x - y)) < 1e-13
+    }
+
+    profile_at <- function(q) {
+      q <- as.numeric(q)
+
+      if (same_q(q, state$q)) {
+        return(state$profile)
+      }
+
+      baseline_fit <- tryCatch(
+        fit_power_semiparametric_baseline(
+          setup = setup,
+          q = q,
+          delta_start = state$delta,
+          max_iter = baseline_max_iter,
+          tolerance = baseline_tolerance
+        ),
+        error = function(e) NULL
+      )
+
+      if (
+        is.null(baseline_fit) ||
+        !is.finite(baseline_fit$loglik)
+      ) {
+        baseline_fit <- tryCatch(
+          fit_power_semiparametric_baseline(
+            setup = setup,
+            q = q,
+            delta_start = delta_initial,
+            max_iter = baseline_max_iter,
+            tolerance = baseline_tolerance
+          ),
+          error = function(e) NULL
+        )
+      }
+
+      if (
+        is.null(baseline_fit) ||
+        !is.finite(baseline_fit$loglik)
+      ) {
+        return(NULL)
+      }
+
+      state$n_profile <- state$n_profile + 1L
+
+      out <- list(
         q = q,
-        delta_start = delta,
-        max_iter = 200L,
-        tolerance = 1e-6
+        delta = baseline_fit$delta,
+        loglik = baseline_fit$loglik,
+        nll = -baseline_fit$loglik,
+        baseline_iterations = baseline_fit$iterations,
+        baseline_gradient = baseline_fit$max_eta_score,
+        baseline_convergence = baseline_fit$convergence
       )
 
-    delta <- baseline_fit$delta
-
-    structural_fit <-
-      optimize_power_semiparametric_structural(
-        setup = setup,
-        delta = delta,
-        q_start = q
+      state$q <- q
+      state$delta <- baseline_fit$delta
+      state$profile <- out
+      state$history[[length(state$history) + 1L]] <- list(
+        phase = phase,
+        evaluation = state$n_profile,
+        theta = exp(q[1]),
+        gamma = exp(q[2]),
+        alpha = q[3],
+        logLik = baseline_fit$loglik,
+        baseline_iterations = baseline_fit$iterations,
+        baseline_gradient = baseline_fit$max_eta_score
       )
 
-    q <- structural_fit$par
+      if (verbose) {
+        cat(
+          phase,
+          state$n_profile,
+          "| theta",
+          round(exp(q[1]), 6),
+          "| gamma",
+          round(exp(q[2]), 6),
+          "| alpha",
+          round(q[3], 6),
+          "| logLik",
+          round(baseline_fit$loglik, 6),
+          "| baseline iter",
+          baseline_fit$iterations,
+          "| baseline score",
+          signif(baseline_fit$max_eta_score, 4),
+          "\n"
+        )
+      }
 
-    current <-
-      power_semiparametric_components(
+      out
+    }
+
+    fixed_delta_nll <- function(q, delta) {
+      z <- power_semiparametric_components(
         setup = setup,
         q = q,
         delta = delta
       )
 
-    denominator <-
-      power_semiparametric_baseline_denominator(
-        setup = setup,
-        q = q,
-        delta = delta
-      )
+      if (!is.finite(z$loglik)) {
+        return(1e100)
+      }
 
-    baseline_score <-
+      -z$loglik
+    }
+
+    envelope_gradient <- function(
+      q,
+      delta,
+      rel_step = 1e-4
+    ) {
+      g <- numeric(length(q))
+
+      for (k in seq_along(q)) {
+        h <- rel_step * max(1, abs(q[k]))
+        q_minus <- q
+        q_plus <- q
+
+        q_minus[k] <- max(
+          lower[k],
+          q[k] - h
+        )
+
+        q_plus[k] <- min(
+          upper[k],
+          q[k] + h
+        )
+
+        if (q_plus[k] > q_minus[k]) {
+          f_minus <- fixed_delta_nll(
+            q_minus,
+            delta
+          )
+          f_plus <- fixed_delta_nll(
+            q_plus,
+            delta
+          )
+
+          g[k] <- (
+            f_plus -
+              f_minus
+          ) / (
+            q_plus[k] -
+              q_minus[k]
+          )
+        } else {
+          g[k] <- 0
+        }
+      }
+
+      g
+    }
+
+    list(
+      profile_at = profile_at,
+      envelope_gradient = envelope_gradient,
+      state = state
+    )
+  }
+
+  run_optimizer <- function(
+    solver,
+    q_start,
+    factr,
+    pgtol
+  ) {
+    initial <- solver$profile_at(q_start)
+
+    if (is.null(initial)) {
+      stop("initial profile failed")
+    }
+
+    reference_nll <- initial$nll
+
+    objective <- function(q) {
+      z <- solver$profile_at(q)
+
+      if (is.null(z)) {
+        anchor <- if (is.null(solver$state$q)) {
+          q_start
+        } else {
+          solver$state$q
+        }
+
+        dq <- q - anchor
+
+        return(
+          1e6 +
+            1e4 *
+              sum(dq^2)
+        )
+      }
+
+      z$nll -
+        reference_nll
+    }
+
+    gradient <- function(q) {
+      z <- solver$profile_at(q)
+
+      if (is.null(z)) {
+        anchor <- if (is.null(solver$state$q)) {
+          q_start
+        } else {
+          solver$state$q
+        }
+
+        return(
+          2e4 *
+            (
+              q -
+                anchor
+            )
+        )
+      }
+
+      solver$envelope_gradient(
+        q = q,
+        delta = z$delta,
+        rel_step = 1e-4
+      )
+    }
+
+    optim(
+      par = q_start,
+      fn = objective,
+      gr = gradient,
+      method = "L-BFGS-B",
+      lower = lower,
+      upper = upper,
+      control = list(
+        maxit = 200,
+        factr = factr,
+        pgtol = pgtol
+      )
+    )
+  }
+
+  main_solver <- make_solver(
+    delta_initial = delta0,
+    baseline_tolerance = 1e-7,
+    baseline_max_iter = 1000L,
+    phase = "profile"
+  )
+
+  main_fit <- run_optimizer(
+    solver = main_solver,
+    q_start = q0,
+    factr = 100,
+    pgtol = 1e-7
+  )
+
+  main_profile <- main_solver$profile_at(
+    main_fit$par
+  )
+
+  if (is.null(main_profile)) {
+    stop("final main profile failed")
+  }
+
+  main_gradient <- main_solver$envelope_gradient(
+    q = main_fit$par,
+    delta = main_profile$delta,
+    rel_step = 1e-5
+  )
+
+  main_max_gradient <- max(
+    abs(main_gradient)
+  )
+
+  polished <- main_max_gradient > 1e-4
+
+  if (polished) {
+    polish_solver <- make_solver(
+      delta_initial = main_profile$delta,
+      baseline_tolerance = 1e-9,
+      baseline_max_iter = 2000L,
+      phase = "polish"
+    )
+
+    polish_fit <- run_optimizer(
+      solver = polish_solver,
+      q_start = main_fit$par,
+      factr = 1,
+      pgtol = 1e-9
+    )
+
+    final_fit <- polish_fit
+    final_solver <- polish_solver
+    final_profile <- polish_solver$profile_at(
+      polish_fit$par
+    )
+
+    history <- c(
+      main_solver$state$history,
+      polish_solver$state$history
+    )
+
+    profile_evaluations <-
+      main_solver$state$n_profile +
+      polish_solver$state$n_profile
+
+    polishing_evaluations <-
+      polish_solver$state$n_profile
+  } else {
+    final_fit <- main_fit
+    final_solver <- main_solver
+    final_profile <- main_profile
+    history <- main_solver$state$history
+    profile_evaluations <- main_solver$state$n_profile
+    polishing_evaluations <- 0L
+  }
+
+  if (is.null(final_profile)) {
+    stop("final profile failed")
+  }
+
+  q <- final_fit$par
+  delta <- final_profile$delta
+
+  final_gradient <- final_solver$envelope_gradient(
+    q = q,
+    delta = delta,
+    rel_step = 1e-5
+  )
+
+  structural_gradient <- max(
+    abs(final_gradient)
+  )
+
+  denominator <-
+    power_semiparametric_baseline_denominator(
+      setup = setup,
+      q = q,
+      delta = delta
+    )
+
+  final_baseline_score <- max(
+    abs(
       setup$event_counts -
         delta *
           denominator
-
-    max_baseline_score <- max(
-      abs(
-        baseline_score
-      )
     )
-
-    q_change <- max(
-      abs(
-        q -
-          q_old
-      )
-    )
-
-    delta_change <- max(
-      abs(
-        log(
-          delta
-        ) -
-          log(
-            delta_old
-          )
-      )
-    )
-
-    loglik_change <- if (
-      is.finite(
-        loglik_previous
-      )
-    ) {
-      abs(
-        current$loglik -
-          loglik_previous
-      )
-    } else {
-      Inf
-    }
-
-    history[[outer_iter]] <-
-      data.frame(
-        iteration =
-          outer_iter,
-        logLik =
-          current$loglik,
-        theta =
-          exp(
-            q[1]
-          ),
-        gamma =
-          exp(
-            q[2]
-          ),
-        alpha =
-          q[3],
-        q_change =
-          q_change,
-        delta_change =
-          delta_change,
-        structural_gradient =
-          structural_fit$max_abs_gradient,
-        baseline_gradient =
-          max_baseline_score,
-        baseline_iterations =
-          baseline_fit$iterations
-      )
-
-    if (verbose) {
-      cat(
-        "outer",
-        outer_iter,
-        "| logLik",
-        format(
-          current$loglik,
-          digits = 12
-        ),
-        "| theta",
-        format(
-          exp(
-            q[1]
-          ),
-          digits = 7
-        ),
-        "| gamma",
-        format(
-          exp(
-            q[2]
-          ),
-          digits = 7
-        ),
-        "| alpha",
-        format(
-          q[3],
-          digits = 7
-        ),
-        "| q change",
-        format(
-          q_change,
-          scientific = TRUE,
-          digits = 4
-        ),
-        "| baseline score",
-        format(
-          max_baseline_score,
-          scientific = TRUE,
-          digits = 4
-        ),
-        "| structural score",
-        format(
-          structural_fit$max_abs_gradient,
-          scientific = TRUE,
-          digits = 4
-        ),
-        "\n"
-      )
-    }
-
-    if (
-      outer_iter > 1L &&
-      q_change <
-        outer_tolerance &&
-      max_baseline_score <
-        1e-4 &&
-      structural_fit$max_abs_gradient <
-        1e-4 &&
-      loglik_change <
-        1e-5
-    ) {
-      converged <- TRUE
-      break
-    }
-
-    loglik_previous <-
-      current$loglik
-  }
-
-  history <- do.call(
-    rbind,
-    history[
-      seq_len(
-        outer_iter
-      )
-    ]
   )
 
-  final_converged <- FALSE
-  final_max_iter <- 50L
-  final_loglik_previous <- -Inf
+  final <- power_semiparametric_components(
+    setup = setup,
+    q = q,
+    delta = delta
+  )
 
-  for (
-    final_iter in
-      seq_len(
-        final_max_iter
-      )
-  ) {
-    q_old_final <- q
-
-    final_baseline <-
-      fit_power_semiparametric_baseline(
-        setup = setup,
-        q = q,
-        delta_start = delta,
-        max_iter = 300L,
-        tolerance = 1e-7
-      )
-
-    delta <-
-      final_baseline$delta
-
-    final_structural <-
-      optimize_power_semiparametric_structural(
-        setup = setup,
-        delta = delta,
-        q_start = q
-      )
-
-    q <- final_structural$par
-
-    final <-
-      power_semiparametric_components(
-        setup = setup,
-        q = q,
-        delta = delta
-      )
-
-    denominator <-
-      power_semiparametric_baseline_denominator(
-        setup = setup,
-        q = q,
-        delta = delta
-      )
-
-    final_baseline_score <- max(
-      abs(
-        setup$event_counts -
-          delta *
-            denominator
-      )
-    )
-
-    final_q_change <- max(
-      abs(
-        q -
-          q_old_final
-      )
-    )
-
-    final_loglik_change <- if (
-      is.finite(
-        final_loglik_previous
-      )
-    ) {
-      abs(
-        final$loglik -
-          final_loglik_previous
-      )
-    } else {
-      Inf
-    }
-
-    if (
-      final_iter > 1L &&
-      final_q_change <
-        outer_tolerance &&
-      final_baseline_score <
-        1e-4 &&
-      final_structural$max_abs_gradient <
-        1e-4 &&
-      final_loglik_change <
-        1e-5
-    ) {
-      final_converged <- TRUE
-      break
-    }
-
-    final_loglik_previous <-
-      final$loglik
-  }
-
-  reference <-
-    power_semiparametric_components(
-      setup = setup,
-      q = q,
-      delta = delta,
-      reference = TRUE
-    )
+  reference <- power_semiparametric_components(
+    setup = setup,
+    q = q,
+    delta = delta,
+    reference = TRUE
+  )
 
   quadrature_difference <-
     final$loglik -
       reference$loglik
-
-  lower <- c(
-    log(0.02),
-    log(0.05),
-    -10
-  )
-
-  upper <- c(
-    log(10),
-    log(8),
-    10
-  )
 
   boundary_hit <- any(
     q -
@@ -1487,18 +1501,24 @@ fit_power_gamma_semiparametric <- function(
         1e-5
   )
 
-  fit_ok <-
-    final_converged &&
-    final_structural$convergence ==
+  converged_outer <-
+    main_fit$convergence ==
+      0L
+
+  converged_final <-
+    final_fit$convergence ==
       0L &&
-    !boundary_hit &&
     is.finite(
       final$loglik
     ) &&
-    final_structural$max_abs_gradient <
+    structural_gradient <
       1e-4 &&
     final_baseline_score <
-      1e-4 &&
+      1e-4
+
+  fit_ok <-
+    converged_final &&
+    !boundary_hit &&
     is.finite(
       quadrature_difference
     ) &&
@@ -1509,41 +1529,41 @@ fit_power_gamma_semiparametric <- function(
 
   list(
     fit_ok = fit_ok,
-    converged_outer =
-      converged,
-    converged_final =
-      final_converged,
-    final_iterations =
-      final_iter,
-    theta =
-      exp(
-        q[1]
-      ),
-    gamma =
-      exp(
-        q[2]
-      ),
-    alpha =
-      q[3],
-    delta =
-      delta,
-    event_times =
-      setup$event_times,
-    logLik =
-      final$loglik,
-    reference_logLik =
-      reference$loglik,
-    quadrature_difference =
-      quadrature_difference,
-    structural_gradient =
-      final_structural$max_abs_gradient,
-    baseline_gradient =
-      final_baseline_score,
-    selected_method =
-      final_structural$selected_method,
-    history =
-      history,
-    weibull_initial_fit =
-      weibull_fit
+    converged_outer = converged_outer,
+    converged_final = converged_final,
+    final_iterations = profile_evaluations,
+    theta = exp(q[1]),
+    gamma = exp(q[2]),
+    alpha = q[3],
+    delta = delta,
+    event_times = setup$event_times,
+    logLik = final$loglik,
+    reference_logLik = reference$loglik,
+    quadrature_difference = quadrature_difference,
+    structural_gradient = structural_gradient,
+    baseline_gradient = final_baseline_score,
+    selected_method = if (polished) {
+      "profile_L_BFGS_B_polished"
+    } else {
+      "profile_L_BFGS_B"
+    },
+    history = history,
+    weibull_initial_fit = weibull_fit,
+    profile_evaluations = profile_evaluations,
+    polishing_evaluations = polishing_evaluations,
+    polished = polished,
+    main_structural_gradient = main_max_gradient,
+    optimizer_convergence = final_fit$convergence,
+    optimizer_message = final_fit$message
+  )
+}
+
+fit_power_gamma_semiparametric <- function(
+  sim,
+  verbose = FALSE
+) {
+  fit_power_gamma_semiparametric_profile(
+    sim = sim,
+    verbose = verbose
   )
 }
