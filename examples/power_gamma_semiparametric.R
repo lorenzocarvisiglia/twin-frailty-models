@@ -22,7 +22,7 @@ sim <- simulate_power_gamma_data(
   visit_step = 1
 )
 
-fit <- fit_power_gamma_semiparametric(
+fit <- fit_power_gamma_semiparametric_profile(
   sim
 )
 
