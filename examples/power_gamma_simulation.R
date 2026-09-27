@@ -1,4 +1,5 @@
 source("R/simulation_utils.R")
+source("R/fit_utils.R")
 source("R/power_gamma.R")
 
 set.seed(1234)
@@ -31,3 +32,11 @@ cat("Frailty variance:", sim$generated_frailty_variance, "\n")
 
 head(sim$subjects)
 head(sim$long)
+
+fit <- fit_power_gamma(
+  sim
+)
+
+fit$estimates
+fit$fit_ok
+fit$diagnostics
